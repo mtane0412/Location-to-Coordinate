@@ -1,0 +1,36 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "location-to-coordinate",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-03-03",
+  "vars": {
+    "GOOGLE_MAPS_API_KEY": ""
+  },
+  "kv_namespaces": [
+    {
+      "binding": "LOCATION_CACHE",
+      "id": "e44e02edfde844c19e526d07ecf5ea63",
+      "preview_id": "d7f8402bc78645039e67bae1dbef716d"
+    }
+  ],
+  // "r2_buckets": [
+  //   {
+  //     "binding": "MY_BUCKET",
+  //     "bucket_name": "my-bucket"
+  //   }
+  // ],
+  // "d1_databases": [
+  //   {
+  //     "binding": "MY_DB",
+  //     "database_name": "my-database",
+  //     "database_id": ""
+  //   }
+  // ],
+  // "ai": {
+  //   "binding": "AI"
+  // },
+  // "observability": {
+  //   "enabled": true,
+  //   "head_sampling_rate": 1
+  // }
+}
