@@ -3,9 +3,6 @@
   "name": "location-to-coordinate",
   "main": "src/index.ts",
   "compatibility_date": "2025-03-03",
-  "vars": {
-    "GOOGLE_MAPS_API_KEY": ""
-  },
   "kv_namespaces": [
     {
       "binding": "LOCATION_CACHE",
