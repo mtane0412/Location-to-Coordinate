@@ -11,9 +11,9 @@
 ## 技術スタック
 
 - [Cloudflare Workers](https://workers.cloudflare.com/)
-- [Hono](https://hono.dev/) - 軽量で高速なウェブフレームワーク
+- [Hono](https://hono.dev/)
 - [Google Maps Geocoding API](https://developers.google.com/maps/documentation/geocoding/overview)
-- [Cloudflare KV](https://developers.cloudflare.com/workers/runtime-apis/kv/) - キャッシュストレージ
+- [Cloudflare KV](https://developers.cloudflare.com/workers/runtime-apis/kv/)
 
 ## セットアップ
 
