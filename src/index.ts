@@ -21,6 +21,12 @@ type GeocodingResponse = {
   fromCache?: boolean;
 };
 
+// レート制限の設定
+const RATE_LIMIT = {
+  MAX_REQUESTS: 20,  // 1分間あたりの最大リクエスト数
+  WINDOW_SIZE: 60,   // 時間枠（秒）
+};
+
 const app = new Hono<{ Bindings: Bindings }>();
 
 // CORSを有効化
@@ -31,6 +37,47 @@ const CACHE_TTL = 60 * 60 * 24 * 30;
 
 // Google Maps APIのベースURL
 const GOOGLE_MAPS_API_BASE_URL = 'https://maps.googleapis.com/maps/api/geocode/json';
+
+/**
+ * Google APIへのリクエストに対するレート制限をチェックする関数
+ * 1分間に最大20リクエストまで許可
+ */
+async function checkRateLimit(kv: KVNamespace): Promise<{ allowed: boolean; error?: string }> {
+  const now = Math.floor(Date.now() / 1000); // 現在時刻（秒）
+  const windowStart = now - RATE_LIMIT.WINDOW_SIZE; // 1分前の時刻
+  const rateLimitKey = 'google-api-rate-limit';
+  
+  try {
+    // 現在のレート制限情報を取得
+    const rateLimitData = await kv.get(rateLimitKey, 'json') as { requests: { timestamp: number }[] } | null;
+    let requests = rateLimitData?.requests || [];
+    
+    // 時間枠内のリクエストのみをフィルタリング
+    requests = requests.filter(req => req.timestamp >= windowStart);
+    
+    // リクエスト数が制限を超えているかチェック
+    if (requests.length >= RATE_LIMIT.MAX_REQUESTS) {
+      const oldestTimestamp = requests[0].timestamp;
+      const resetTime = oldestTimestamp + RATE_LIMIT.WINDOW_SIZE - now;
+      return {
+        allowed: false,
+        error: `レート制限を超えました。約${resetTime}秒後に再試行してください。`
+      };
+    }
+    
+    // 新しいリクエストを追加
+    requests.push({ timestamp: now });
+    
+    // レート制限情報を更新
+    await kv.put(rateLimitKey, JSON.stringify({ requests }), { expirationTtl: RATE_LIMIT.WINDOW_SIZE * 2 });
+    
+    return { allowed: true };
+  } catch (error) {
+    console.error('レート制限チェックエラー:', error);
+    // エラーが発生した場合でもリクエストを許可（安全側に倒す）
+    return { allowed: true };
+  }
+}
 
 // フロントエンドのUIを提供するエンドポイント
 app.get('/', (c) => {
@@ -233,10 +280,17 @@ app.get('/api/geocode', async (c) => {
       });
     }
     
+    // キャッシュミスの場合、レート制限をチェック
+    const rateLimitCheck = await checkRateLimit(c.env.LOCATION_CACHE);
+    if (!rateLimitCheck.allowed) {
+      return c.json<GeocodingResponse>({
+        success: false,
+        error: rateLimitCheck.error || 'レート制限を超えました'
+      }, 429); // 429 Too Many Requests
+    }
+    
     // Google Maps APIを呼び出す
     const url = `${GOOGLE_MAPS_API_BASE_URL}?address=${encodeURIComponent(address)}&key=${c.env.GOOGLE_MAPS_API_KEY}&language=ja`;
-    console.log('APIリクエストURL (キーは非表示):', url.replace(c.env.GOOGLE_MAPS_API_KEY, 'API_KEY_HIDDEN'));
-    console.log('APIキーの長さ:', c.env.GOOGLE_MAPS_API_KEY.length);
     
     const response = await fetch(url);
     const data = await response.json() as {
@@ -252,9 +306,7 @@ app.get('/api/geocode', async (c) => {
       }>,
       error_message?: string
     };
-    
-    console.log('APIレスポンス:', JSON.stringify(data, null, 2));
-    
+        
     if (data.status !== 'OK' || !data.results || data.results.length === 0) {
       const errorMessage = data.error_message
         ? `住所が見つかりませんでした: ${data.status} - ${data.error_message}`
@@ -315,10 +367,17 @@ app.get('/api/geocode/refresh', async (c) => {
   const cacheKey = `geocode:${address}`;
   
   try {
+    // レート制限をチェック
+    const rateLimitCheck = await checkRateLimit(c.env.LOCATION_CACHE);
+    if (!rateLimitCheck.allowed) {
+      return c.json<GeocodingResponse>({
+        success: false,
+        error: rateLimitCheck.error || 'レート制限を超えました'
+      }, 429); // 429 Too Many Requests
+    }
+    
     // Google Maps APIを呼び出す
     const url = `${GOOGLE_MAPS_API_BASE_URL}?address=${encodeURIComponent(address)}&key=${c.env.GOOGLE_MAPS_API_KEY}&language=ja`;
-    console.log('リフレッシュ - APIリクエストURL (キーは非表示):', url.replace(c.env.GOOGLE_MAPS_API_KEY, 'API_KEY_HIDDEN'));
-    console.log('リフレッシュ - APIキーの長さ:', c.env.GOOGLE_MAPS_API_KEY.length);
     
     const response = await fetch(url);
     const data = await response.json() as {
@@ -334,9 +393,7 @@ app.get('/api/geocode/refresh', async (c) => {
       }>,
       error_message?: string
     };
-    
-    console.log('リフレッシュ - APIレスポンス:', JSON.stringify(data, null, 2));
-    
+        
     if (data.status !== 'OK' || !data.results || data.results.length === 0) {
       const errorMessage = data.error_message
         ? `住所が見つかりませんでした: ${data.status} - ${data.error_message}`
@@ -403,10 +460,14 @@ app.get('/api/geocode/plain', async (c) => {
       return c.text(parsedResult.formatted);
     }
     
+    // キャッシュミスの場合、レート制限をチェック
+    const rateLimitCheck = await checkRateLimit(c.env.LOCATION_CACHE);
+    if (!rateLimitCheck.allowed) {
+      return c.text(`エラー: ${rateLimitCheck.error || 'レート制限を超えました'}`, 429); // 429 Too Many Requests
+    }
+    
     // Google Maps APIを呼び出す
     const url = `${GOOGLE_MAPS_API_BASE_URL}?address=${encodeURIComponent(address)}&key=${c.env.GOOGLE_MAPS_API_KEY}&language=ja`;
-    console.log('プレーンテキスト - APIリクエストURL (キーは非表示):', url.replace(c.env.GOOGLE_MAPS_API_KEY, 'API_KEY_HIDDEN'));
-    console.log('プレーンテキスト - APIキーの長さ:', c.env.GOOGLE_MAPS_API_KEY.length);
     
     const response = await fetch(url);
     const data = await response.json() as {
@@ -422,9 +483,7 @@ app.get('/api/geocode/plain', async (c) => {
       }>,
       error_message?: string
     };
-    
-    console.log('プレーンテキスト - APIレスポンス:', JSON.stringify(data, null, 2));
-    
+        
     if (data.status !== 'OK' || !data.results || data.results.length === 0) {
       const errorMessage = data.error_message
         ? `エラー: 住所が見つかりませんでした: ${data.status} - ${data.error_message}`
